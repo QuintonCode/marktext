@@ -236,9 +236,12 @@
     );
 }
 
+/* No scroll/clip box: NativeBoat moves a nested scroller a frame behind the
+   page, so code blocks lagged then snapped while scrolling. Long lines spill
+   past the box unless "Wrap code blocks" is on. */
 .mu-code-block .mu-code {
     display: block;
-    overflow: auto;
+    overflow: visible;
 
     /* Override the <code> UA monospace so the block's code font reaches the text. */
     font-family: inherit;
@@ -246,7 +249,7 @@
 
 /* wrapCodeBlocks → `.mu-code-wrap`; wraps long lines (overrides prism's `pre`). */
 .mu-code-wrap .mu-code-block .mu-code {
-    overflow: hidden;
+    overflow: visible;
 
     white-space: pre-wrap;
     overflow-wrap: break-word;
