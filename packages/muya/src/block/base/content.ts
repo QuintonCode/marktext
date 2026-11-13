@@ -205,6 +205,12 @@ interface IAutoPairCollapsedContext {
     type: string;
 }
 
+// Length of the word (plus the spaces after it) that Ctrl+Backspace removes from
+// the end of `before`, like Word: `foo bar ` -> `foo `. Stops at a line break.
+export function wordBeforeLength(before: string): number {
+    return /\S*[^\S\n]*$/.exec(before)![0].length;
+}
+
 function deleteAutoPair(
     event: InputEvent,
     text: string,
@@ -854,7 +860,7 @@ class Content extends TreeNode {
 
         switch (event.key) {
             case EVENT_KEYS.Backspace:
-                if (!this.isComposed)
+                if (!this.isComposed && !this._deleteWordBackward(event))
                     this.backspaceHandler(event);
 
                 break;
@@ -892,6 +898,33 @@ class Content extends TreeNode {
                 break;
         }
     };
+
+    // Ctrl+Backspace: delete back to the previous space ourselves instead of
+    // relying on the engine's word deletion (NativeBoat builds only remove one
+    // character). Returns false to fall back to plain Backspace: at the start of
+    // the block, right after a line break, or with a selection.
+    private _deleteWordBackward(event: KeyboardEvent): boolean {
+        if (!event.ctrlKey || event.altKey || event.metaKey)
+            return false;
+
+        const cursor = this.getCursor();
+        if (!cursor || cursor.start.offset !== cursor.end.offset)
+            return false;
+
+        const { offset } = cursor.start;
+        const { text } = this;
+        const from = offset - wordBeforeLength(text.substring(0, offset));
+        if (from === offset)
+            return false;
+
+        event.preventDefault();
+        event.stopPropagation();
+        this.muya.editor.history.markInputBoundary('deleteWordBackward', null);
+        this.text = text.substring(0, from) + text.substring(offset);
+        this.setCursor(from, from, true);
+
+        return true;
+    }
 
     private _wrapSelectionWithAutoPair(event: KeyboardEvent) {
         if (
