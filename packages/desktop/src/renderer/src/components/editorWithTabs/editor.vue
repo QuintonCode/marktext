@@ -71,6 +71,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, reactive, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from 'vue'
 import log from 'electron-log'
+import debounce from 'lodash/debounce'
 import {
   Muya,
   CodeBlockLanguageSelector,
@@ -121,6 +122,7 @@ import {
 } from '@/util/tocNavigation'
 import { findActiveHeadingSlug, type HeadingPosition } from '@/util/findActiveHeading'
 import { addCommonStyle, setEditorWidth } from '@/util/theme'
+import { startInputLagLogger } from '@/util/inputLagLogger'
 import { usePreferencesStore } from '@/store/preferences'
 import { useEditorStore } from '@/store/editor'
 import { useProjectStore } from '@/store/project'
@@ -776,6 +778,7 @@ watch(
         // edit permanently. Same guard as saving (#3803) and tab switch
         // (#2938).
         editor.value.flush()
+        flushContentChange()
         // Compute the WYSIWYG caret as a source-markdown `{ line, ch }` index
         // cursor JUST-IN-TIME, only when entering source mode (Phase G — G7),
         // and write it to the tab before sourceCode.vue mounts (`flush: 'sync'`
@@ -1406,6 +1409,10 @@ const pushSelectionMenuState = (changes: MuyaChange) => {
   editorStore.SELECTION_FORMATS((changes.formats ?? []) as SelectionFormatLike[])
 }
 
+// Each push updates dozens of native menu items; in NativeBoat builds that runs
+// on the typing thread, so do it once the caret settles instead of per keystroke.
+const schedulePushSelectionMenuState = debounce(pushSelectionMenuState, 100, { maxWait: 500 })
+
 const handleEditParagraph = (type: unknown) => {
   // These commands act on the hidden WYSIWYG engine, so block them in
   // source-code mode (mirrors handleUndo/handleSelectAll) — otherwise e.g. the
@@ -1475,6 +1482,7 @@ interface FileLoadedPayload {
 const setMarkdownToEditor = (payload: unknown) => {
   const { id, markdown: newMarkdown, cursor: newCursor } = (payload ?? {}) as FileLoadedPayload
   if (editor.value) {
+    flushContentChange()
     // `setContent` resets the document and clears the undo history; only set a
     // cursor afterwards (a freshly-opened file has no history to restore).
     editor.value.setContent(newMarkdown ?? '')
@@ -1528,6 +1536,7 @@ const handleFileChange = (payload: unknown) => {
     isReload
   } = (payload ?? {}) as FileChangePayload
   if (!editor.value) return
+  flushContentChange()
   const container = getScrollContainer()
   if (!container) return
 
@@ -1639,8 +1648,55 @@ const blurEditor = () => {
   editor.value?.blur(false, true)
 }
 
+// The engine emits a low-level `json-change` on every document mutation; the
+// desktop's content-change pipeline wants the derived document snapshot
+// (markdown / word count / cursor / history / TOC / block AST). Building it and
+// pushing it through the store re-renders the tab bar, status bar and outline,
+// which is cheap in Chromium but costs enough per keystroke in NativeBoat builds
+// that fast typing queues up. So the snapshot is taken once typing pauses
+// (debounced), and committed immediately wherever the store reads the content
+// or the editor swaps documents (save, tab switch, source mode, close).
+let pendingContentChangeId: string | null = null
+let stopInputLagLogger: (() => void) | null = null
+
+const commitContentChange = () => {
+  const id = pendingContentChangeId
+  pendingContentChangeId = null
+  if (!id || !editor.value) return
+  const start = performance.now()
+  const markdown = editor.value.getMarkdown()
+  // Stash the real engine history for in-session tab-switch restoration. The
+  // synthetic save-tracking id is derived from the live document content (a
+  // monotonic, never-reused id — see `syntheticHistory.ts`), NOT the engine
+  // undo-stack depth, which is reused and falsely showed a divergently
+  // re-edited tab as clean (Phase G — G6).
+  const engineHistory = editor.value.getHistory()
+  engineHistoryByTab.set(id, engineHistory)
+  editorStore.LISTEN_FOR_CONTENT_CHANGE({
+    id,
+    markdown,
+    wordCount: muyaWordCount(markdown),
+    cursor: serializeCursor(editor.value.getSelection()),
+    // Synthetic, desktop-shaped history so the store's save/dirty tracking
+    // keeps working (the engine history shape is incompatible).
+    history: makeSyntheticHistory(id, markdown),
+    toc: editor.value.getTOC(),
+    blocks: editor.value.getState()
+  })
+  const ms = performance.now() - start
+  if (ms >= 30) log.warn(`[input-lag] content snapshot took ${Math.round(ms)} ms`)
+}
+
+const scheduleContentChange = debounce(commitContentChange, 150, { maxWait: 1000 })
+
+// Commit any pending snapshot now (the store or a document swap needs it).
+const flushContentChange = () => {
+  scheduleContentChange.flush()
+}
+
 const flushActiveEditor = () => {
   editor.value?.flush()
+  flushContentChange()
 }
 
 const focusEditor = () => {
@@ -1875,36 +1931,22 @@ onMounted(() => {
   bus.on('open-command-spellchecker-switch-language', openSpellcheckerLanguageCommand)
   bus.on('replace-misspelling', replaceMisspelling)
 
-  // The engine emits a low-level `json-change` ({ op, source, prevDoc, doc })
-  // on every document mutation; the desktop's content-change pipeline wants the
-  // derived document snapshot (markdown / word count / cursor / history / TOC /
-  // block AST), so we compute it here — mirroring the legacy engine's
-  // `dispatchChange` payload.
+  // Snapshot the document for the store once typing pauses; see
+  // `commitContentChange`.
   editor.value.on('json-change', () => {
     // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
     // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
     if (!currentFile.value || !editor.value) return
     const { id } = currentFile.value
     if (!id) return
-    const markdown = editor.value.getMarkdown()
-    // Stash the real engine history for in-session tab-switch restoration. The
-    // synthetic save-tracking id is derived from the live document content (a
-    // monotonic, never-reused id — see `syntheticHistory.ts`), NOT the engine
-    // undo-stack depth, which is reused and falsely showed a divergently
-    // re-edited tab as clean (Phase G — G6).
-    const engineHistory = editor.value.getHistory()
-    engineHistoryByTab.set(id, engineHistory)
-    editorStore.LISTEN_FOR_CONTENT_CHANGE({
-      id,
-      markdown,
-      wordCount: muyaWordCount(markdown),
-      cursor: serializeCursor(editor.value.getSelection()),
-      // Synthetic, desktop-shaped history so the store's save/dirty tracking
-      // keeps working (the engine history shape is incompatible).
-      history: makeSyntheticHistory(id, markdown),
-      toc: editor.value.getTOC(),
-      blocks: editor.value.getState()
-    })
+    // Every document swap flushes first, so a pending snapshot for another tab
+    // means the editor no longer holds that tab's content: drop it rather than
+    // file this tab's content under the other tab.
+    if (pendingContentChangeId && pendingContentChangeId !== id) {
+      scheduleContentChange.cancel()
+    }
+    pendingContentChangeId = id
+    scheduleContentChange()
   })
 
   // The engine does not emit `scroll`; listen on the scroll container directly
@@ -1997,10 +2039,11 @@ onMounted(() => {
     if (currentFile.value?.id && editor.value) {
       editorStore.PERSIST_CURSOR(currentFile.value.id, serializeCursor(editor.value.getSelection()))
     }
-    pushSelectionMenuState(changes)
+    schedulePushSelectionMenuState(changes)
   })
 
   document.addEventListener('keyup', keyup)
+  stopInputLagLogger = startInputLagLogger()
 
   setEditorWidth(editorLineWidth.value)
 })
@@ -2041,6 +2084,7 @@ onBeforeUnmount(() => {
   bus.off('language-changed', handleLanguageChanged)
 
   document.removeEventListener('keyup', keyup)
+  stopInputLagLogger?.()
   editorStore.SET_SELECTION_WORD_COUNT(null)
 
   // Remove the manual scroll listener; engine `on(...)` listeners are torn down
@@ -2053,7 +2097,9 @@ onBeforeUnmount(() => {
 
   resizeObserverForEditor.disconnect()
 
+  schedulePushSelectionMenuState.cancel()
   if (editor.value) {
+    flushContentChange()
     editor.value.destroy()
     editor.value = null
   }

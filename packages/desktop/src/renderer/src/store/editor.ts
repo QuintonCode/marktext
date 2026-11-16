@@ -683,6 +683,8 @@ export const useEditorStore = defineStore('editor', {
       const projectStore = useProjectStore()
       const preferencesStore = usePreferencesStore()
       window.electron.ipcRenderer.on('mt::ask-for-close', () => {
+        // Commit pending edits so unsaved changes are detected and kept.
+        this.flushActiveEditor()
         sendBufferedState()
           .catch((err) => {
             console.error('Failed to update buffered state before closing', err)
@@ -722,6 +724,7 @@ export const useEditorStore = defineStore('editor', {
     },
 
     ASK_FOR_SAVE_ALL(closeTabs: boolean): void {
+      this.flushActiveEditor()
       const { tabs } = this
       const projectStore = useProjectStore()
       const unsavedFiles = tabs
@@ -996,6 +999,8 @@ export const useEditorStore = defineStore('editor', {
     },
 
     CLOSE_TAB(file: IFileState | null = null): void {
+      // Commit pending edits first so a just-edited tab is seen as unsaved.
+      this.flushActiveEditor()
       const target = file ?? this.currentFile
       if (target === null) return
 
@@ -1108,6 +1113,7 @@ export const useEditorStore = defineStore('editor', {
     },
 
     CLOSE_SAVED_TABS(): void {
+      this.flushActiveEditor()
       this.tabs
         .filter((f) => f.isSaved)
         .forEach((tab) => {
@@ -1349,6 +1355,8 @@ export const useEditorStore = defineStore('editor', {
 
       let keepTabBarState = false
       if (currentFile) {
+        // Commit pending edits so a just-typed untitled tab is not discarded.
+        this.flushActiveEditor()
         const { isSaved, pathname: cfPath } = currentFile
         if (isSaved && !cfPath) {
           keepTabBarState = true
@@ -1715,6 +1723,8 @@ export const useEditorStore = defineStore('editor', {
 
     LISTEN_FOR_FILE_CHANGE(): void {
       window.electron.ipcRenderer.on('mt::update-file', (_, payload) => {
+        // Commit pending edits so a just-edited tab is not reloaded over.
+        this.flushActiveEditor()
         const { type, change } = payload
         const { tabs } = this
         const { pathname } = change
