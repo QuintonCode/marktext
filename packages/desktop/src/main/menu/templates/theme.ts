@@ -17,6 +17,7 @@ const LIGHT_THEMES: ReadonlyArray<readonly [string, string]> = [
   ['rosePineDawn', 'rose-pine-dawn'],
   ['solarizedLight', 'solarized-light'],
   ['tokyoNightLight', 'tokyo-night-light'],
+  ['tokyoNightWhite', 'tokyo-night-white'],
   ['ulyssesLight', 'ulysses']
 ]
 

@@ -69,6 +69,7 @@ const themeBackgroundColors: ReadonlyMap<string, string> = new Map([
   ['synthwave-84', '#262335'],
   ['tokyo-night', '#1a1b26'],
   ['tokyo-night-light', '#d5d6db'],
+  ['tokyo-night-white', '#ffffff'],
   ['tokyo-night-storm', '#24283b'],
   ['ulysses', '#f3f3f3']
 ])

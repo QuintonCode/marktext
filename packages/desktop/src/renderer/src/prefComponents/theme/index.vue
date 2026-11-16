@@ -367,6 +367,13 @@ const onSelectChange = (type: keyof PreferencesState, value: unknown): void => {
         color: #34548a;
       }
     }
+    &.tokyo-night-white {
+      color: #343b58;
+      background: #ffffff;
+      & a {
+        color: #34548a;
+      }
+    }
     &.solarized-light {
       color: #657b83;
       background: #fdf6e3;

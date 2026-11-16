@@ -30,6 +30,7 @@ import cyberdreamTheme from '../assets/themes/cyberdream.theme.css?inline'
 import catppuccinLatteTheme from '../assets/themes/catppuccin-latte.theme.css?inline'
 import gruvboxLightTheme from '../assets/themes/gruvbox-light.theme.css?inline'
 import tokyoNightLightTheme from '../assets/themes/tokyo-night-light.theme.css?inline'
+import tokyoNightWhiteTheme from '../assets/themes/tokyo-night-white.theme.css?inline'
 import solarizedLightTheme from '../assets/themes/solarized-light.theme.css?inline'
 import ayuLightTheme from '../assets/themes/ayu-light.theme.css?inline'
 import everforestLightTheme from '../assets/themes/everforest-light.theme.css?inline'
@@ -197,4 +198,8 @@ export const everforestLight = (): string => {
 
 export const rosePineDawn = (): string => {
   return rosePineDawnTheme + '\n' + rosePineDawnPrismTheme
+}
+
+export const tokyoNightWhite = (): string => {
+  return tokyoNightWhiteTheme + '\n' + tokyoNightLightPrismTheme
 }

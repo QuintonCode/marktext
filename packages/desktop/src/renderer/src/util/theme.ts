@@ -36,6 +36,7 @@ import {
   catppuccinLatte,
   gruvboxLight,
   tokyoNightLight,
+  tokyoNightWhite,
   solarizedLight,
   ayuLight,
   everforestLight,
@@ -158,6 +159,9 @@ export const addThemeStyle = (theme: string): void => {
       break
     case 'tokyo-night-light':
       themeStyleEle.innerHTML = patchTheme(tokyoNightLight())
+      break
+    case 'tokyo-night-white':
+      themeStyleEle.innerHTML = patchTheme(tokyoNightWhite())
       break
     case 'solarized-light':
       themeStyleEle.innerHTML = patchTheme(solarizedLight())
